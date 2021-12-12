@@ -76,6 +76,18 @@ module JsonLdHelper
     json.present? && json['id'] == uri ? json : nil
   end
 
+  def fetch_resource_from_lookup(uri, on_behalf_of = nil)
+    uri = uri.split('#').first
+    json = fetch_resource_without_id_validation(ENV['LOOKUP_SERVER'] + 'get/' + uri, on_behalf_of)
+    json = json['json']
+    json = JSON.parse json
+    json.present? && json['id'] == uri ? json : nil
+  rescue => exception
+    puts "Error during fetch"
+    puts "Backtrace:\n\t#{exception.backtrace.join("\n\t")}"
+    raise
+  end
+
   def fetch_resource_without_id_validation(uri, on_behalf_of = nil, raise_on_temporary_error = false)
     on_behalf_of ||= Account.representative
 
