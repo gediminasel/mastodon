@@ -729,6 +729,7 @@ DEPENDENCIES
   i18n-tasks (~> 0.9)
   idn-ruby
   iso-639
+  json (~> 2.5.1)
   json-ld
   json-ld-preloaded (~> 3.1)
   kaminari (~> 1.2)

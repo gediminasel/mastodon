@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 module JsonLdHelper
+  include LookupHelper
+
   def equals_or_includes?(haystack, needle)
     haystack.is_a?(Array) ? haystack.include?(needle) : haystack == needle
   end
@@ -63,6 +65,16 @@ module JsonLdHelper
     graph.dump(:normalize)
   end
 
+  LookupResource = Struct.new(:json, :fresh)
+  # tries to fetch from uri, if fails then falls back to lookup server.
+  # returns fetched value and whether it was fetched from given uri
+  def fetch_resource_with_fallback(uri, id, on_behalf_of = nil)
+    json = fetch_resource(uri, id, on_behalf_of)
+    return LookupResource.new(json, true) unless json.nil?
+    json = fetch_resource_from_lookup(uri, on_behalf_of)
+    LookupResource.new(json, json.nil?)
+  end
+
   def fetch_resource(uri, id, on_behalf_of = nil)
     unless id
       json = fetch_resource_without_id_validation(uri, on_behalf_of)
@@ -78,14 +90,9 @@ module JsonLdHelper
 
   def fetch_resource_from_lookup(uri, on_behalf_of = nil)
     uri = uri.split('#').first
-    json = fetch_resource_without_id_validation(ENV['LOOKUP_SERVER'] + 'get/' + uri, on_behalf_of)
-    json = json['json']
-    json = JSON.parse json
+    data = fetch_resource_without_id_validation("#{ENV['LOOKUP_SERVER']}get/#{uri}", on_behalf_of)
+    json = extract_lookup_data(data)
     json.present? && json['id'] == uri ? json : nil
-  rescue => exception
-    puts "Error during fetch"
-    puts "Backtrace:\n\t#{exception.backtrace.join("\n\t")}"
-    raise
   end
 
   def fetch_resource_without_id_validation(uri, on_behalf_of = nil, raise_on_temporary_error = false)

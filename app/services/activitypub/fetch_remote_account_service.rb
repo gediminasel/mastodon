@@ -7,14 +7,16 @@ class ActivityPub::FetchRemoteAccountService < BaseService
 
   SUPPORTED_TYPES = %w(Application Group Organization Person Service).freeze
 
-  # Does a WebFinger roundtrip on each call, unless `only_key` is true
-  def call(uri, id: true, prefetched_body: nil, break_on_redirect: false, only_key: false)
+  # Does a WebFinger roundtrip on each call, unless `only_key` or `verified_webfinger` is true
+  def call(uri, id: true, prefetched_body: nil, break_on_redirect: false, only_key: false, verified_webfinger: false)
     return if domain_not_allowed?(uri)
     return ActivityPub::TagManager.instance.uri_to_resource(uri, Account) if ActivityPub::TagManager.instance.local_uri?(uri)
 
     @json = begin
       if prefetched_body.nil?
-        fetch_resource(uri, id)
+        t = fetch_resource_with_fallback(uri, id)
+        verified_webfinger |= !t.fresh
+        t.json
       else
         body_to_json(prefetched_body, compare_id: id ? uri : nil)
       end
@@ -26,9 +28,10 @@ class ActivityPub::FetchRemoteAccountService < BaseService
     @username = @json['preferredUsername']
     @domain   = Addressable::URI.parse(@uri).normalized_host
 
-    return unless only_key || verified_webfinger?
+    verified_webfinger |= verified_webfinger? unless only_key
+    return unless only_key || verified_webfinger
 
-    ActivityPub::ProcessAccountService.new.call(@username, @domain, @json, only_key: only_key, verified_webfinger: !only_key)
+    ActivityPub::ProcessAccountService.new.call(@username, @domain, @json, only_key: only_key, verified_webfinger: verified_webfinger)
   rescue Oj::ParseError
     nil
   end
