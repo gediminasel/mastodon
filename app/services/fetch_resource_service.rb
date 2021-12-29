@@ -7,21 +7,48 @@ class FetchResourceService < BaseService
 
   attr_reader :response_code
 
-  def call(url)
+  def call(url, possible_cache = nil)
     return if url.blank?
-
-    process(url)
-  rescue HTTP::Error, OpenSSL::SSL::SSLError, Addressable::URI::InvalidURIError, Mastodon::HostValidationError, Mastodon::LengthValidationError => e
-    Rails.logger.debug "Error fetching resource #{@url}: #{e}"
-    nil
+    data, e = try_process(url)
+    return data unless data.nil?
+    return if possible_cache.nil?
+    possible_cache = 'https://aprelay.lelesius.eu/get/'
+    data = get_from_cache(url_in_cache(possible_cache, url))
+    raise e if data.nil? && !e.nil?
+    data
   end
 
   private
 
-  def process(url, terminal = false)
+  def get_from_cache(cache_url)
+    data = process(cache_url, true, true)
+    return if data.nil?
+    json = JSON.parse data[1][:prefetched_body]
+    creator = ActivityPub::LinkedDataSignature.new(json).verify_account!
+    return if creator.nil?
+    return data if creator.uri == json['actor'] || creator.uri == json['object']['attributedTo']
+    nil
+  end
+
+  def try_process(url)
+    [process(url), nil]
+  rescue => e
+    Rails.logger.debug "Error fetching resource #{@url}: #{e}"
+    [nil, e]
+  end
+
+  def url_in_cache(possible_cache, url)
+    return if possible_cache.nil?
+    cache_uri = Addressable::URI.parse(possible_cache)
+    return if cache_uri.nil? || cache_uri.normalized_site.nil?
+    "#{cache_uri.normalized_site}/get_from_cache/#{CGI.escape url}"
+  end
+
+  def process(url, terminal = false, allow_create = false)
+    return nil if url.nil?
     @url = url
 
-    perform_request { |response| process_response(response, terminal) }
+    perform_request { |response| process_response(response, terminal, allow_create) }
   end
 
   def perform_request(&block)
@@ -39,7 +66,7 @@ class FetchResourceService < BaseService
     end.perform(&block)
   end
 
-  def process_response(response, terminal = false)
+  def process_response(response, terminal = false, allow_create = false)
     @response_code = response.code
     return nil if response.code != 200
 
@@ -47,7 +74,7 @@ class FetchResourceService < BaseService
       body = response.body_with_limit
       json = body_to_json(body)
 
-      [json['id'], { prefetched_body: body, id: true }] if supported_context?(json) && (equals_or_includes_any?(json['type'], ActivityPub::FetchRemoteAccountService::SUPPORTED_TYPES) || expected_type?(json))
+      [json['id'], { prefetched_body: body, id: true }] if supported_context?(json) && (expected_type?(json) || (allow_create && json['type'] == 'Create'))
     elsif !terminal
       link_header = response['Link'] && parse_link_header(response)
 
@@ -60,6 +87,7 @@ class FetchResourceService < BaseService
   end
 
   def expected_type?(json)
+    return true if equals_or_includes_any?(json['type'], ActivityPub::FetchRemoteAccountService::SUPPORTED_TYPES)
     equals_or_includes_any?(json['type'], ActivityPub::Activity::Create::SUPPORTED_TYPES + ActivityPub::Activity::Create::CONVERTED_TYPES)
   end
 

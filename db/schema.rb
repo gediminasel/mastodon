@@ -838,6 +838,7 @@ ActiveRecord::Schema.define(version: 2021_11_26_000907) do
     t.bigint "in_reply_to_id"
     t.bigint "reblog_of_id"
     t.string "url"
+    t.string "signed_json"
     t.boolean "sensitive", default: false, null: false
     t.integer "visibility", default: 0, null: false
     t.text "spoiler_text", default: "", null: false

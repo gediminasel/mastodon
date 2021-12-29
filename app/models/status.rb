@@ -11,6 +11,7 @@
 #  in_reply_to_id         :bigint(8)
 #  reblog_of_id           :bigint(8)
 #  url                    :string
+#  signed_json            :string
 #  sensitive              :boolean          default(FALSE), not null
 #  visibility             :integer          default("public"), not null
 #  spoiler_text           :text             default(""), not null

@@ -10,25 +10,29 @@ class ActivityPub::FetchRemoteKeyService < BaseService
     if prefetched_body.nil?
       t = fetch_resource_with_fallback(uri, false)
       @json = t.json
-      @verified_webfinger = !t.fresh
+      webfinger = t.aux['webfinger']
     else
       @json = body_to_json(prefetched_body, compare_id: id ? uri : nil)
-      @verified_webfinger = false
+      webfinger = nil
     end
 
     return unless supported_context?(@json) && expected_type?
-    return find_account(@json['id'], @json) if person?
+    return find_account(@json['id'], @json, webfinger) if person?
 
-    @owner = fetch_resource(owner_uri, true)
+    t = fetch_resource_with_fallback(owner_uri, true)
+    @owner = t.json
+    webfinger = t.aux && t.aux['webfinger']
 
     return unless supported_context?(@owner) && confirmed_owner?
 
-    find_account(owner_uri, @owner)
+    find_account(owner_uri, @owner, webfinger)
   end
 
-  def find_account(uri, prefetched_body)
+  private
+
+  def find_account(uri, prefetched_body, webfinger)
     account   = ActivityPub::TagManager.instance.uri_to_resource(uri, Account)
-    account ||= ActivityPub::FetchRemoteAccountService.new.call(uri, prefetched_body: prefetched_body, verified_webfinger: @verified_webfinger)
+    account ||= ActivityPub::FetchRemoteAccountService.new.call(uri, prefetched_body: prefetched_body, verified_webfinger: webfinger)
     account
   end
 

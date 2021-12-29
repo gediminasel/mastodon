@@ -104,6 +104,7 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
         language: detected_language,
         spoiler_text: converted_object_type? ? '' : (text_from_summary || ''),
         created_at: @object['published'],
+        signed_json: signed_json,
         override_timestamps: @options[:override_timestamps],
         reply: @object['inReplyTo'].present?,
         sensitive: @account.sensitized? || @object['sensitive'] || false,
@@ -114,6 +115,14 @@ class ActivityPub::Activity::Create < ActivityPub::Activity
         poll: process_poll,
       }
     end
+  end
+
+  def signed_json
+    return nil unless [:public, :unlisted].include?(visibility_from_audience)
+    return nil if @json.nil?
+    return JSON.generate @json unless @json['signature'].nil?
+    return JSON.generate @object unless @object['signature'].nil?
+    nil
   end
 
   def process_audience

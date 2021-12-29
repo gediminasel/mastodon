@@ -65,14 +65,18 @@ module JsonLdHelper
     graph.dump(:normalize)
   end
 
-  LookupResource = Struct.new(:json, :fresh)
+  LookupResource = Struct.new(:json, :fresh, :aux)
   # tries to fetch from uri, if fails then falls back to lookup server.
   # returns fetched value and whether it was fetched from given uri
   def fetch_resource_with_fallback(uri, id, on_behalf_of = nil)
-    json = fetch_resource(uri, id, on_behalf_of)
-    return LookupResource.new(json, true) unless json.nil?
-    json = fetch_resource_from_lookup(uri, on_behalf_of)
-    LookupResource.new(json, json.nil?)
+    begin
+      json = fetch_resource(uri, id, on_behalf_of)
+      return LookupResource.new(json, true, nil) unless json.nil?
+    rescue Mastodon::UnexpectedResponseError
+      # Ignored
+    end
+    json, aux = fetch_resource_from_lookup(uri, on_behalf_of)
+    LookupResource.new(json, json.nil?, aux)
   end
 
   def fetch_resource(uri, id, on_behalf_of = nil)
@@ -89,10 +93,15 @@ module JsonLdHelper
   end
 
   def fetch_resource_from_lookup(uri, on_behalf_of = nil)
+    json, aux = fetch_resource_from_lookup_ignore_id(uri, on_behalf_of)
+    json.present? && json['id'] == uri ? [json, aux] : nil
+  end
+
+  def fetch_resource_from_lookup_ignore_id(uri, on_behalf_of = nil)
     uri = uri.split('#').first
     data = fetch_resource_without_id_validation("#{ENV['LOOKUP_SERVER']}get/#{uri}", on_behalf_of)
-    json = extract_lookup_data(data)
-    json.present? && json['id'] == uri ? json : nil
+    json, aux = extract_lookup_data(data)
+    json.present? ? [json, aux] : nil
   end
 
   def fetch_resource_without_id_validation(uri, on_behalf_of = nil, raise_on_temporary_error = false)

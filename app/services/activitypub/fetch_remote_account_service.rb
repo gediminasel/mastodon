@@ -7,28 +7,37 @@ class ActivityPub::FetchRemoteAccountService < BaseService
 
   SUPPORTED_TYPES = %w(Application Group Organization Person Service).freeze
 
-  # Does a WebFinger roundtrip on each call, unless `only_key` or `verified_webfinger` is true
-  def call(uri, id: true, prefetched_body: nil, break_on_redirect: false, only_key: false, verified_webfinger: false)
+  # Does a WebFinger roundtrip on each call, unless `only_key` or `verified_webfinger` is not nil
+  def call(uri, id: true, prefetched_body: nil, break_on_redirect: false, only_key: false, verified_webfinger: nil)
     return if domain_not_allowed?(uri)
     return ActivityPub::TagManager.instance.uri_to_resource(uri, Account) if ActivityPub::TagManager.instance.local_uri?(uri)
-
-    @json = begin
-      if prefetched_body.nil?
-        t = fetch_resource_with_fallback(uri, id)
-        verified_webfinger |= !t.fresh
-        t.json
-      else
-        body_to_json(prefetched_body, compare_id: id ? uri : nil)
-      end
-    end
+    @json = if prefetched_body.nil?
+              t = fetch_resource_with_fallback(uri, id)
+              verified_webfinger ||= t.aux['webfinger'] unless t.aux.nil?
+              t.json
+            else
+              body_to_json(prefetched_body, compare_id: id ? uri : nil)
+            end
 
     return if !supported_context? || !expected_type? || (break_on_redirect && @json['movedTo'].present?)
 
-    @uri      = @json['id']
+    @uri = @json['id']
     @username = @json['preferredUsername']
-    @domain   = Addressable::URI.parse(@uri).normalized_host
+    @domain = Addressable::URI.parse(@uri).normalized_host
 
-    verified_webfinger |= verified_webfinger? unless only_key
+    if verified_webfinger.nil?
+      verified_webfinger = verified_webfinger? unless only_key
+    else
+      username, domain = split_acct(verified_webfinger)
+      if username.nil? || domain.nil?
+        verified_webfinger = false
+      else
+        @username = username
+        @domain = domain
+        verified_webfinger = true
+      end
+    end
+
     return unless only_key || verified_webfinger
 
     ActivityPub::ProcessAccountService.new.call(@username, @domain, @json, only_key: only_key, verified_webfinger: verified_webfinger)
@@ -39,13 +48,13 @@ class ActivityPub::FetchRemoteAccountService < BaseService
   private
 
   def verified_webfinger?
-    webfinger                            = webfinger!("acct:#{@username}@#{@domain}")
+    webfinger = webfinger!("acct:#{@username}@#{@domain}")
     confirmed_username, confirmed_domain = split_acct(webfinger.subject)
 
     return webfinger.link('self', 'href') == @uri if @username.casecmp(confirmed_username).zero? && @domain.casecmp(confirmed_domain).zero?
 
-    webfinger                            = webfinger!("acct:#{confirmed_username}@#{confirmed_domain}")
-    @username, @domain                   = split_acct(webfinger.subject)
+    webfinger = webfinger!("acct:#{confirmed_username}@#{confirmed_domain}")
+    @username, @domain = split_acct(webfinger.subject)
 
     return false unless @username.casecmp(confirmed_username).zero? && @domain.casecmp(confirmed_domain).zero?
     return false if webfinger.link('self', 'href') != @uri

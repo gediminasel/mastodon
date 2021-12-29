@@ -13,46 +13,64 @@ class ResolveAccountService < BaseService
   # @option options [Boolean] :skip_webfinger Do not attempt any webfinger query or refreshing account data
   # @return [Account]
   def call(uri, options = {})
-    return if uri.blank?
+    begin
+      return if uri.blank?
 
-    process_options!(uri, options)
+      process_options!(uri, options)
 
-    # First of all we want to check if we've got the account
-    # record with the URI already, and if so, we can exit early
+      # First of all we want to check if we've got the account
+      # record with the URI already, and if so, we can exit early
 
-    return if domain_not_allowed?(@domain)
+      return if domain_not_allowed?(@domain)
 
-    @account ||= Account.find_remote(@username, @domain)
+      @account ||= Account.find_remote(@username, @domain)
 
-    return @account if @account&.local? || @domain.nil? || !webfinger_update_due?
+      return @account if @account&.local? || @domain.nil? || !webfinger_update_due?
 
-    # At this point we are in need of a Webfinger query, which may
-    # yield us a different username/domain through a redirect
-    process_webfinger!(@uri)
-    @domain = nil if TagManager.instance.local_domain?(@domain)
+      # At this point we are in need of a Webfinger query, which may
+      # yield us a different username/domain through a redirect
+      process_webfinger!(@uri)
+      @domain = nil if TagManager.instance.local_domain?(@domain)
 
-    # Because the username/domain pair may be different than what
-    # we already checked, we need to check if we've already got
-    # the record with that URI, again
+      # Because the username/domain pair may be different than what
+      # we already checked, we need to check if we've already got
+      # the record with that URI, again
 
-    return if domain_not_allowed?(@domain)
+      return if domain_not_allowed?(@domain)
 
-    @account ||= Account.find_remote(@username, @domain)
+      @account ||= Account.find_remote(@username, @domain)
 
-    if gone_from_origin? && not_yet_deleted?
-      queue_deletion!
-      return
+      if gone_from_origin? && not_yet_deleted?
+        queue_deletion!
+        return
+      end
+
+      return @account if @account&.local? || gone_from_origin? || !webfinger_update_due?
+
+      # Now it is certain, it is definitely a remote account, and it
+      # either needs to be created, or updated from fresh data
+
+      return fetch_account!
+    rescue Webfinger::Error, Oj::ParseError => e
+      Rails.logger.debug "Webfinger query for #{@uri} failed: #{e}"
+    rescue => e
+      Rails.logger.debug "Webfinger query for #{@uri} failed badly: #{e}"
     end
 
-    return @account if @account&.local? || gone_from_origin? || !webfinger_update_due?
+    json, aux = fetch_resource_from_lookup_ignore_id "acct:#{@uri}"
+    return nil if json.nil? || (json['id'].nil? && json['uri'].nil?) || aux.nil? || aux['webfinger'] != "acct:#{@uri}"
 
-    # Now it is certain, it is definitely a remote account, and it
-    # either needs to be created, or updated from fresh data
+    @domain = nil if TagManager.instance.local_domain?(@domain)
+    return if domain_not_allowed?(@domain)
 
-    fetch_account!
+    @account ||= Account.find_remote(@username, @domain)
+    return @account if @account&.local?
+
+    fetch_account_from!(json['id'] || json['uri'])
   rescue Webfinger::Error, Oj::ParseError => e
-    Rails.logger.debug "Webfinger query for #{@uri} failed: #{e}"
-    nil
+    Rails.logger.debug "Webfinger query in lookup for #{@uri} failed: #{e}"
+  rescue => e
+    Rails.logger.debug "Webfinger query for #{@uri} failed badly: #{e}"
   end
 
   private
@@ -107,9 +125,13 @@ class ResolveAccountService < BaseService
   def fetch_account!
     return unless activitypub_ready?
 
+    fetch_account_from!(actor_url)
+  end
+
+  def fetch_account_from!(url)
     RedisLock.acquire(lock_options) do |lock|
       if lock.acquired?
-        @account = ActivityPub::FetchRemoteAccountService.new.call(actor_url)
+        @account = ActivityPub::FetchRemoteAccountService.new.call(url)
       else
         raise Mastodon::RaceConditionError
       end

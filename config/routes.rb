@@ -26,6 +26,8 @@ Rails.application.routes.draw do
   get '.well-known/webfinger', to: 'well_known/webfinger#show', as: :webfinger
   get '.well-known/change-password', to: redirect('/auth/edit')
 
+  get 'get_from_cache/:uri', to: 'well_known/get_from_cache#get', :constraints => {:uri => /.*/}, as: :get_from_cache
+
   get '/nodeinfo/2.0', to: 'well_known/nodeinfo#show', as: :nodeinfo_schema
 
   get 'manifest', to: 'manifests#show', defaults: { format: 'json' }
