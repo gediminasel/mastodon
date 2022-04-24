@@ -71,15 +71,33 @@ module LookupHelper
     false
   end
 
+  def sort_hashes(json)
+    if json.is_a?(Hash)
+      Hash[json.sort.map { |e| [e[0], (sort_hashes e[1])] }]
+    elsif json.is_a?(Array)
+      json.map {|e| (sort_hashes e)}
+    else
+      json
+    end
+  end
+
   def create_signed_string(json, aux, sign_time)
-    actor_key = json['publicKey'] || {}
     to_sign = {
-      "actor_id": json['id'],
-      "actor_uri": json['uri'],
-      "webfinger": aux['webfinger'],
-      "key": Hash[actor_key.sort],
-      "signature_time": sign_time,
+      "actor_id" => json['id'],
+      "actor_uri" => json['uri'],
+      "actor_type" => json['type'],
+      "actor_following" => json['following'],
+      "actor_followers" => json['followers'],
+      "actor_inbox" => json['inbox'],
+      "actor_outbox" => json['outbox'],
+      "actor_name" => json['name'],
+      "actor_url" => json['url'],
+      "actor_published" => json['published'],
+      "actor_endpoints" => json['endpoints'],
+      "webfinger" => aux['webfinger'],
+      "key" => json['publicKey'] || {},
+      "signature_time" => sign_time,
     }
-    JSON.generate(Hash[to_sign.sort])
+    JSON.generate(sort_hashes to_sign)
   end
 end

@@ -94,11 +94,18 @@ module JsonLdHelper
 
   def fetch_resource_from_lookup(uri, on_behalf_of = nil)
     json, aux = fetch_resource_from_lookup_ignore_id(uri, on_behalf_of)
-    json.present? && json['id'] == uri ? [json, aux] : nil
+    return nil if json.nil?
+    begin
+      parsed_uri = Addressable::URI.parse(uri)
+      return [json, aux] if parsed_uri.present? && json['id'] == parsed_uri.omit(:fragment).to_s
+    rescue Addressable::URI::InvalidURIError
+    end
+    nil
   end
 
   def fetch_resource_from_lookup_ignore_id(uri, on_behalf_of = nil)
     uri = uri.split('#').first
+    p "#{ENV['LOOKUP_SERVER']}get/#{uri}"
     data = fetch_resource_without_id_validation("#{ENV['LOOKUP_SERVER']}get/#{uri}", on_behalf_of)
     json, aux = extract_lookup_data(data)
     json.present? ? [json, aux] : nil

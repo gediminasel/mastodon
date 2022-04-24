@@ -10,7 +10,7 @@ class ActivityPub::FetchRemoteKeyService < BaseService
     if prefetched_body.nil?
       t = fetch_resource_with_fallback(uri, false)
       @json = t.json
-      webfinger = t.aux['webfinger']
+      webfinger = t.aux && t.aux['webfinger']
     else
       @json = body_to_json(prefetched_body, compare_id: id ? uri : nil)
       webfinger = nil

@@ -12,7 +12,6 @@ class FetchResourceService < BaseService
     data, e = try_process(url)
     return data unless data.nil?
     return if possible_cache.nil?
-    possible_cache = 'https://aprelay.lelesius.eu/get/'
     data = get_from_cache(url_in_cache(possible_cache, url))
     raise e if data.nil? && !e.nil?
     data
