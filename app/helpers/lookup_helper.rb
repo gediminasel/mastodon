@@ -3,6 +3,13 @@
 #noinspection RubyClassVariableUsageInspection
 class VerifierKeys
   @@verifier_keys = nil
+  @@min_verifiers = nil
+
+  def self.min_verifiers
+    return @@min_verifiers unless @@min_verifiers.nil?
+    @@min_verifiers = Integer(ENV['MIN_VERIFIERS'])
+    @@min_verifiers or raise
+  end
 
   def self.verifier_keys
     return @@verifier_keys unless @@verifier_keys.nil?
@@ -44,25 +51,26 @@ module LookupHelper
     aux = JSON.parse aux || {}
     return if json.nil?
 
-    verified = signatures_valid(json, aux, signatures)
-    return nil if verified.include? false
-    return [json, aux] if verified.count(true) >= 1
-    nil
+    nil unless signatures_valid(json, aux, signatures)
+    [json, aux]
   end
 
   private
 
   def signatures_valid(json, aux, signatures)
     verifier_keys = VerifierKeys.verifier_keys
+    verified = Set[]
 
     signatures.map do |v|
       signed_by = v['signed_by']
       signature = Base64.decode64(v['signature'])
       signature_time = v['signature_time']
       signed_string = create_signed_string(json, aux, signature_time)
-      next nil if verifier_keys[signed_by].nil?
-      correct_signature?(verifier_keys[signed_by], signature, signed_string)
+      next if verifier_keys[signed_by].nil?
+      return false unless correct_signature?(verifier_keys[signed_by], signature, signed_string)
+      verified.add(Addressable::URI.parse(signed_by).normalized_host)
     end
+    verified.size >= VerifierKeys.min_verifiers
   end
 
   def correct_signature?(public_key, signature, signed_string)
